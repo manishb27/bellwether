@@ -386,8 +386,28 @@ def render_fiction_analyzer():
 
 
 
+from auth import check_authentication, logout
+
 def main():
     st.set_page_config(page_title="Bellwether Studio", layout="wide")
+    
+    # --- Authentication ---
+    if not check_authentication():
+        st.stop()
+        
+    # --- User Profile & Logout (Sidebar) ---
+    if "user_info" in st.session_state:
+        user = st.session_state["user_info"]
+        with st.sidebar:
+            st.divider()
+            if "picture" in user:
+                st.image(user["picture"], width=50)
+            st.write(f"Logged in as: **{user.get('name', 'User')}**")
+            st.caption(user.get("email"))
+            if st.button("Log out"):
+                logout()
+            st.divider()
+
     st.title("Bellwether Studio")
 
     # Initialize session state for dimensions if not present (needed for cover generator)
