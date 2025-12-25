@@ -206,10 +206,14 @@ def render_cover_generator():
         # Linked to session state
         trim_width = st.number_input("Trim Width (in)", step=0.01, key="trim_width")
         trim_height = st.number_input("Trim Height (in)", step=0.01, key="trim_height")
-        target_dpi = st.number_input("Target DPI", value=300, step=1)
+        # target_dpi removed from UI, defaulting to 300 internally
+        target_dpi = 300
+        
     with col4:
         page_count = st.number_input("Page Count", value=320, step=1)
-        paper_type = st.selectbox("Paper Type / Weight", list(PPI_VALUES.keys()), index=0)
+        # paper_type removed from UI, defaulting to standard white (PPI 440)
+        paper_type = "Standard White"
+        ppi = 440
 
     st.header("Design Preferences")
     col5, col6 = st.columns(2)
@@ -222,18 +226,15 @@ def render_cover_generator():
         composition = render_option_input("Composition Details", COMPOSITION_OPTIONS, "Centered, negative space at top for title", "comp")
         
         spine_constraints = st.text_input("Spine Constraints", "Low detail")
-        no_text = st.checkbox("No Text in Image", value=True)
+        # Explicitly enforcing no text, UI option removed
+        no_text = True
 
-    st.header("Detailed Image Settings")
-    col7, col8 = st.columns(2)
-    with col7:
-        image_resolution = st.selectbox("Resolution Preference", ["Standard (1024x1024 equivalent)", "HD (High Definition)", "Ultra HD (4k equivalent)"], index=1)
-    with col8:
-        image_quality = st.slider("Quality/Fidelity (Prompt weighting)", min_value=1, max_value=100, value=90)
+    # Hardcoded Image Settings (UI options removed)
+    image_resolution = "HD (High Definition)"
+    image_quality = 95
 
     # Calculations
     # Spine Width = (Page Count / PPI)
-    ppi = PPI_VALUES[paper_type]
     spine_width_in = page_count / ppi
     
     # Full Cover Dimensions
@@ -244,128 +245,103 @@ def render_cover_generator():
     full_height_px = int(full_height_in * target_dpi)
     safe_zone_px = int(SAFE_ZONE_IN * target_dpi)
 
-    # Prompt Generation
-    
-    # Prompt Generation
-    
-    # 2. Whole Cover Prompt
-    # Updated for seamless panoramic look without rigid dividers
-    # 2. Whole Cover Prompt
-    # Updated for seamless panoramic look without rigid dividers, AND TEXT-FREE
-    whole_cover_prompt = (
-        f"{genre} seamless panoramic book cover spread. Layout: Continuous artwork wrapping from back to front. "
-        f"Right side (Front Cover): {front_focus}. "
-        f"Left side (Back Cover): Scene continuing {mood}. "
-        f"Center (Spine): Visual texture blending front and back. "
-        f"Style: {style}. Mood: {mood}. Composition: {composition}, {color_palette}. "
-        f"IMPORTANT: DO NOT RENDER ANY TEXT. NO TITLE, NO AUTHOR NAME, NO BLURB. "
-        f"Pure visual artwork only. "
-        f"NO BORDERS, NO FRAME, NO SEPARATE SPINE BOX. The image must be full bleed, edge-to-edge artwork. "
-        f"Resolution: {image_resolution}. Quality: {image_quality}. "
-        f"Physical specs: Spine width {spine_width_in:.3f} inches. "
-        f"--ar {full_width_in:.3f}:{full_height_in:.3f}"
-    )
-
-    # Construct JSON
-    data = {
-        "book_info": {
-            "title": title,
-            "subtitle": subtitle,
-            "author": author,
-            "genre": genre,
-            "category": category,
-            "trim_size_in": {
-                "width": trim_width,
-                "height": trim_height
-            },
-            "page_count": page_count,
-            "paper_type": paper_type,
-            "isbn": isbn,
-            "blurb": blurb
+    # Construct Data Object for Prompt Generation
+    user_choices = {
+        "title": title,
+        "subtitle": subtitle,
+        "author": author,
+        "genre": genre,
+        "mood": mood,
+        "style": style,
+        "composition": composition,
+        "color_palette": color_palette,
+        "front_focus": front_focus,
+        "spine_constraints": spine_constraints,
+        "dimensions": {
+             "full_width_in": full_width_in,
+             "full_height_in": full_height_in,
+             "aspect_ratio": f"{full_width_in:.2f}:{full_height_in:.2f}"
         },
-        "computed": {
-            "spine_width_in": spine_width_in,
-            "whole_cover_size_in": {
-                "width": full_width_in,
-                "height": full_height_in
-            },
-            "whole_cover_size_px": {
-                "width": full_width_px,
-                "height": full_height_px
-            },
-            "safe_zone_px": safe_zone_px
-        },
-        "design": {
-            "mood": mood,
-            "art_style": style,
-            "composition": composition,
-            "color_palette": color_palette,
-            "front_focus_description": front_focus,
-            "spine_constraints": spine_constraints,
-            "no_text_in_image": no_text,
-            "image_specs": {
-                "resolution": image_resolution,
-                "quality_score": image_quality
-            }
-        },
-        "prompts": {
-            "whole_cover_prompt": whole_cover_prompt
-        }
+        "blurb": blurb
     }
-
-    # Display Prompt Preview
-    st.subheader("Prompt Preview")
-    
-    st.markdown("**Whole Cover** (Use for print, includes spine & back)")
-    st.code(whole_cover_prompt, language="text")
-
-    if st.button("Generate JSON"):
-        st.subheader("Generated JSON")
-        st.json(data)
-        st.code(json.dumps(data, indent=2), language="json")
 
     st.subheader("Visual Preview")
     if st.button("Generate Web Image (Gemini 3 Pro)"):
-        with st.spinner("Generating cover image..."):
-            # Construct a rich prompt with JSON specs for layout and the descriptive text
-            # We urge the model to respect the dimensions and layout in the JSON.
-            prompt_input = (
-                f"Generate a high-quality book cover image based on these specifications:\n\n"
-                f"{json.dumps(data, indent=2)}\n\n"
-                f"Visual Description: {whole_cover_prompt}\n"
-                f"IMPORTANT: Ignore 'title', 'subtitle', 'author', 'blurb' fields in the JSON. "
-                f"Do NOT include any text, typography, or letters in the generated image. "
-                f"Ensure the image is borderless and fills the aspect ratio exactly."
-            )
-            
-            # Generating...
-            img = generate_image_from_prompt(prompt_input)
-            
-            if img:
-                # Post-process: Force alignment to calculated Aspect Ratio
-                # This fixes "protruding bars" if the model outputs a slightly different ratio or adds padding.
-                target_w = data['computed']['whole_cover_size_px']['width']
-                target_h = data['computed']['whole_cover_size_px']['height']
+        with st.spinner("Refining prompt with Gemini 2.0 Flash Lite..."):
+            try:
+                # 1. Generate Creative Prompt
+                prompt_request = (
+                    f"Create a highly detailed image generation prompt for a book cover based on the following specifications:\n"
+                    f"{json.dumps(user_choices, indent=2)}\n\n"
+                    f"The image must be a SINGLE CONTINUOUS WIDE CINEMATIC SHOT. It will be wrapped around a book later, but the image itself must be a continuous painting.\n"
+                    f"Do not include any text, letters, titles, or author names in the image (this is artwork only).\n"
+                    f"Describe the scene such that the main focus is on the right and the scene extends atmospherically to the left.\n"
+                    f"CRITICAL: DO NOT describe a 'spine' or 'center spine' or 'book spine'. Treat the center of the image as just the middle of the scene. DO NOT allow the model to draw a vertical line, bar, or shadow in the middle.\n"
+                    f"Ensure the aspect ratio fits {full_width_in:.2f} (width) by {full_height_in:.2f} (height).\n"
+                    f"Return ONLY the prompt text."
+                )
                 
-                # Use PIL ImageOps.fit to center-crop/resize to exact dimensions
-                # centering=(0.5, 0.5) crops from center.
-                img_processed = ImageOps.fit(img, (target_w, target_h), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+                prompt_response = client.models.generate_content(
+                    model="models/gemini-2.0-flash-lite",
+                    contents=[prompt_request]
+                )
+                
+                refined_prompt = prompt_response.text
+                # st.caption("DEBUG: Refined Prompt used:")
+                # st.code(refined_prompt)
+                
+            except Exception as e:
+                st.error(f"Error generating prompt: {e}")
+                refined_prompt = None
 
-                # Layout columns for 2D and 3D views
-                res_col1, res_col2 = st.columns(2)
+        if refined_prompt:
+            with st.spinner("Generating cover image..."):
+                # 2. Generate Image
                 
-                with res_col1:
-                    st.subheader("Flat Cover (Processed)")
-                    st.image(img_processed, caption="Full Spread (Back, Spine, Front)", use_container_width=True)
-                
-                # Prepare base64 for 3D view and download
-                buf = io.BytesIO()
-                img_processed.save(buf, format="PNG")
-                byte_im = buf.getvalue()
-                b64_img = base64.b64encode(byte_im).decode()
+                # Append technical constraints to the refined prompt to ensure compliance
+                final_prompt = (
+                    f"{refined_prompt} "
+                    f" --ar {full_width_in:.2f}:{full_height_in:.2f}"
+                    f" NO TEXT. NO TYPOGRAPHY."
+                )
 
-                with res_col2:
-                    st.subheader("3D Prediction")
+                img = generate_image_from_prompt(final_prompt)
+                
+                if img:
+                    # Post-process: Force alignment to calculated Aspect Ratio
+                    target_w = full_width_px
+                    target_h = full_height_px
+                    
+                    # Use PIL ImageOps.fit to center-crop/resize to exact dimensions
+                    img_processed = ImageOps.fit(img, (target_w, target_h), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+
+                    # Layout columns for 2D and 3D views
+                    res_col1, res_col2 = st.columns(2)
+                    
+                    with res_col1:
+                        st.subheader("Flat Cover (Processed)")
+                        st.image(img_processed, caption="Full Spread (Back, Spine, Front)", use_container_width=True)
+                    
+                    # Prepare base64 for 3D view and download
+                    buf = io.BytesIO()
+                    img_processed.save(buf, format="PNG")
+                    byte_im = buf.getvalue()
+                    b64_img = base64.b64encode(byte_im).decode()
+                    
+                    # Construct data dict for 3D view logic (needed for CSS calcs below)
+                    # We reconstruct the necessary parts of the previous 'data' object
+                    data = {
+                        "book_info": {
+                            "trim_size_in": {"width": trim_width, "height": trim_height}
+                        },
+                        "computed": {
+                            "spine_width_in": spine_width_in,
+                            "whole_cover_size_in": {"width": full_width_in, "height": full_height_in}
+                        }
+                    }
+
+                    with res_col2:
+                        st.subheader("3D Prediction")
                     
                     # Calculate dimensions for CSS
                     # We use a fixed display width for the book front to keep it responsive/uniform

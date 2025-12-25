@@ -1,7 +1,12 @@
 streamlit
 google-genai
-pillow
-python-dotenv
 openai
 pydantic
 nltk
+python-dotenv
+Pillow
+# spacy
+symspellpy
+language-tool-python
+textstat
+pyspellchecker
