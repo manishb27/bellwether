@@ -15,22 +15,32 @@ Generate professional, print-ready book covers with full wrap-around designs (Fr
     - **Full Bleed Support**: Generates dimensions with standard bleed and safe zones automatically included.
 - **JSON Design Export**: Download full design specifications and prompts for professional designers or archival.
 
-### 2. 📖 Fiction Analyzer & Story Bible
+### 2. 📖 Developmental Edit (Fiction)
 An intelligent "Editor Agent" that reads your manuscript in real-time to build a living Story Bible.
 
 - **Dynamic Knowledge Base**: Automatically extracts and tracks:
     - **Characters**: Names, aliases, physical appearances, personality traits, and relationships.
     - **Plot Timeline**: Identifying key narrative beats and story progression.
     - **Locations**: Tracking settings and world-building details.
-- **Smart Deduplication**: Uses fuzzy matching and logic to merge duplicate entities (e.g., realizing "The Captain" and "Captain Thorne" are the same person).
+- **Smart Deduplication**: Uses fuzzy matching and logic to merge duplicate entities.
 - **Tool-Use Architecture**: Powered by **GPT-4o**, the agent autonomously decides when to update the database vs. when to just read.
 
-### 3. ✍️ Grammar & Style Editor
-A specialized copy-editing assistant that goes beyond simple spell-checking.
+### 3. 🧠 Non-Fiction Analyzer
+A dedicated pipeline for technical texts, essays, and research papers.
 
-- **Nuanced Analysis**: categorizes issues into **Critical** (Grammar), **Clarity** (Ambiguity), and **Style** (Suggestions).
+- **Concept Extraction**: Identifies key arguments, core concepts, and claims.
+- **Metric Tracking**: Automatically pulls out statistics and data points.
+- **Structure Analysis**: Maps out the logical flow of the argument.
+
+### 4. ✍️ Grammar & Style Editor (Integrated)
+A centralized grammar dashboard that analyzes text from both the Fiction and Non-Fiction pipelines.
+
+- **Hybrid Analysis Engine**:
+    - **Rule-Based**: Deterministic checks for tense consistency, modal verbs, and style rules (using NLTK & LanguageTool).
+    - **Spell Check**: Robust, offline spell checking via `pyspellchecker`.
+    - **LLM Context**: Uses **GPT-4o-mini** (Temperature 0) to catch subtle contextual errors (e.g., "affect" vs "effect", passive voice) without hallucinating.
 - **Dashboard Metrics**: View a cleanliness score and track error frequency over time.
-- **Historical View**: Compare current drafts against previous analysis runs.
+- **Annotated View**: See errors highlighted directly in your text with tooltips and suggested fixes.
 
 ---
 
@@ -38,7 +48,8 @@ A specialized copy-editing assistant that goes beyond simple spell-checking.
 
 - **Frontend**: [Streamlit](https://streamlit.io/)
 - **Image Generation**: Google GenAI SDK (Gemini 3 Pro)
-- **Natural Language Processing**: OpenAI API (GPT-4o) for logic, NLTK for tokenization.
+- **Natural Language Processing**: OpenAI API (GPT-4o) for logic, NLTK & Spacy for tokenization.
+- **Grammar & Spelling**: `pyspellchecker`, `language-tool-python`, and custom deterministic rules.
 - **Data Management**: Pydantic for strict schema validation.
 
 ---
@@ -89,5 +100,7 @@ Run the main application:
 streamlit run app.py
 ```
 
-- **Cover Generator Tab**: Configure your book size, genre, and design preferences. Click "Generate" to see the 3D preview.
-- **Fiction Analyzer Tab**: Paste chapters or scenes into the text area to have them analyzed by the AI Editor.
+- **Cover Generator**: Configure your book size, genre, and design preferences to generate print-ready covers with 3D previews.
+- **Fiction Analyzer**: Paste chapters to extract character/plot details and run background grammar checks.
+- **Non-Fiction Analyzer**: Analyze technical texts for concepts and claims.
+- **Grammar & Style**: View the consolidated report of all grammar, spelling, and style issues found in your analyzed texts.
