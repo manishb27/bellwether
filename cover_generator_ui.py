@@ -3,7 +3,7 @@ import io
 import json
 import base64
 import streamlit as st
-from PIL import Image, ImageOps, ImageChops
+from PIL import Image, ImageOps, ImageChops, ImageFilter
 from google import genai
 from dotenv import load_dotenv
 
@@ -115,7 +115,13 @@ COLOR_OPTIONS = [
 ]
 
 def render_option_input(label, options, default_custom_value="", key_suffix=""):
-    selection = st.selectbox(label, options, key=f"select_{key_suffix}")
+    # Default to "Custom..." if available, otherwise 0
+    try:
+        default_index = options.index("Custom...")
+    except ValueError:
+        default_index = 0
+
+    selection = st.selectbox(label, options, index=default_index, key=f"select_{key_suffix}")
     if selection == "Custom...":
         return st.text_input(f"Custom {label}", value=default_custom_value, key=f"text_{key_suffix}")
     return selection
@@ -127,9 +133,14 @@ def generate_image_from_prompt(prompt):
     try:
         # Prepend instruction to ensure image generation
         full_prompt = f"Generate an image of: {prompt}"
+        
+        # If the prompt is a list (multimodal), we pass it directly
+        # otherwise we wrap it in a list
+        contents = prompt if isinstance(prompt, list) else [full_prompt]
+
         response = client.models.generate_content(
             model="models/gemini-3-pro-image-preview",
-            contents=[full_prompt],
+            contents=contents,
         )
         
         print(f"DEBUG: Response parts count: {len(response.parts) if response.parts else 0}")
@@ -178,6 +189,26 @@ def trim_black_borders(img, tolerance=30):
     if bbox:
         return img.crop(bbox)
     return img
+
+def get_dominant_colors(img, num_colors=5):
+    """Extracts dominant colors from an image."""
+    img = img.copy()
+    img.thumbnail((150, 150))
+    # Reduce colors
+    paletted = img.convert('P', palette=Image.ADAPTIVE, colors=num_colors)
+    # Find dominant colors
+    palette = paletted.getpalette()
+    color_counts = sorted(paletted.getcolors(), reverse=True)
+    
+    hex_colors = []
+    if color_counts:
+        for count, index in color_counts[:num_colors]:
+            start_idx = index * 3
+            if palette and start_idx + 3 <= len(palette):
+                rgb = tuple(palette[start_idx : start_idx+3])
+                hex_colors.append(f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}")
+    
+    return hex_colors
 
 def update_dimensions_from_preset():
     """Callback to update session state width/height from the selected preset."""
@@ -245,16 +276,44 @@ def render_cover_generator():
     st.header("Design Preferences")
     col5, col6 = st.columns(2)
     with col5:
-        mood = render_option_input("Mood / Lighting", MOOD_OPTIONS, "Atmospheric, dark, cinematic", "mood")
-        style = render_option_input("Art Style / Medium", STYLE_OPTIONS, "Digital painting, hyper-realistic", "style")
-        color_palette = render_option_input("Color Palette", COLOR_OPTIONS, "Dark blue and gold", "color")
+        mood = render_option_input("Mood & Lighting Description", MOOD_OPTIONS, "Atmospheric, dark, cinematic", "mood")
+        style = render_option_input("Art Style & Medium Description", STYLE_OPTIONS, "Digital painting, hyper-realistic", "style")
+        color_palette = render_option_input("Color Palette Description", COLOR_OPTIONS, "Dark blue and gold", "color")
     with col6:
-        front_focus = render_option_input("Main Visual Focus", FOCUS_OPTIONS, "Front-right area for focus", "focus")
-        composition = render_option_input("Composition Details", COMPOSITION_OPTIONS, "Centered, negative space at top for title", "comp")
+        front_focus = render_option_input("Main Subject Focus Description", FOCUS_OPTIONS, "Front-right area for focus", "focus")
+        composition = render_option_input("Composition & Layout Description", COMPOSITION_OPTIONS, "Centered, negative space at top for title", "comp")
         
         spine_constraints = st.text_input("Spine Constraints", "Low detail")
         # Explicitly enforcing no text, UI option removed
         no_text = True
+    
+    st.markdown("---")
+    st.subheader("Reference Image (Optional)")
+    uploaded_ref_img = st.file_uploader("Upload an image to guide the style/composition:", type=["png", "jpg", "jpeg"])
+    reference_image = None
+    if uploaded_ref_img:
+        try:
+             reference_image = Image.open(uploaded_ref_img)
+             st.image(reference_image, caption="Reference", width=200)
+             
+             # influence_type removed (Defaulting to General Mix)
+             
+             ref_strength = st.select_slider(
+                 "Image Influence Strength",
+                 options=["Subtle", "Medium", "Strong", "Maximal"],
+                 value="Strong",
+                 help="Strong/Maximal will force the AI to prioritize the image over your text inputs."
+             )
+             
+             # Extract colors for "Strong" or "Maximal" modes automatically
+             extracted_colors = []
+             if ref_strength in ["Strong", "Maximal"]:
+                 extracted_colors = get_dominant_colors(reference_image)
+                 st.caption(f"Extracted Palette: {', '.join(extracted_colors)}")
+        except Exception:
+             st.error("Invalid image file.")
+    else:
+        influence_type = None
 
     # Hardcoded Image Settings (UI options removed)
     image_resolution = "HD (High Definition)"
@@ -297,7 +356,12 @@ def render_cover_generator():
         with st.spinner("Refining prompt with Gemini 2.0 Flash Lite..."):
             try:
                 # 1. Generate Creative Prompt
-                prompt_request = (
+                # Variable renamed to support logic above
+                # prompt_request = ( ... ) removed to avoid conflict
+
+                
+                # 1. Generate Creative Prompt
+                base_instruction = (
                     f"Create a highly detailed image generation prompt for a book cover based on the following specifications:\n"
                     f"{json.dumps(user_choices, indent=2)}\n\n"
                     f"The image must be a SINGLE CONTINUOUS WIDE CINEMATIC SHOT. It will be wrapped around a book later, but the image itself must be a continuous painting.\n"
@@ -305,17 +369,55 @@ def render_cover_generator():
                     f"Describe the scene such that the main focus is on the right and the scene extends atmospherically to the left.\n"
                     f"CRITICAL: DO NOT describe a 'spine' or 'center spine' or 'book spine'. Treat the center of the image as just the middle of the scene. DO NOT allow the model to draw a vertical line, bar, or shadow in the middle.\n"
                     f"Ensure the aspect ratio fits {full_width_in:.2f} (width) by {full_height_in:.2f} (height).\n"
-                    f"Return ONLY the prompt text."
                 )
+
+                refinement_contents = [base_instruction]
                 
+                if reference_image:
+                     # General / Mix Everything Strategy
+                     ref_instruction = (
+                         "\n\nCRITICAL: I have attached a reference image. "
+                         "Analyze the image and extract its key visual elements, characters, and setting. "
+                         "The final result should look like a creative fusion of the user's requirements and this image's elements."
+                     )
+                         
+                     base_instruction += ref_instruction
+                     
+                     # 1. Inject Extracted Colors if available
+                     if extracted_colors:
+                         base_instruction += (
+                             f"\n\nCOLOR COMPLIANCE: The reference image contains the following specific color palette: {', '.join(extracted_colors)}. "
+                             f"You MUST include these specific colors in the prompt descriptions to ensure visual consistency."
+                         )
+
+                     # 2. Inject Strength Instructions
+                     if ref_strength == "Maximal":
+                         base_instruction += (
+                             "\n\nPRIORITY OVERRIDE: The Reference Image is the PRIMARY SOURCE OF TRUTH. "
+                             "If the User's text description contradicts the visual style or content of the image, IGNORE the text and follow the image. "
+                             "The goal is to replicate the reference image's essence almost exactly, just adapted to the book cover format."
+                         )
+                     elif ref_strength == "Strong":
+                         base_instruction += "\n\nEnsure strong adherence to the reference image's visual identity."
+
+                     refinement_contents = [base_instruction, reference_image]
+
+                base_instruction += "\nReturn ONLY the prompt text."
+                # Verify last item is string to append instruction logic or just rebuild list
+                if isinstance(refinement_contents[-1], str):
+                    refinement_contents[-1] += "\nReturn ONLY the prompt text."
+                else:
+                    refinement_contents.append("Return ONLY the prompt text.")
+
                 prompt_response = client.models.generate_content(
                     model="models/gemini-2.0-flash-lite",
-                    contents=[prompt_request]
+                    contents=refinement_contents
                 )
                 
                 refined_prompt = prompt_response.text
-                # st.caption("DEBUG: Refined Prompt used:")
-                # st.code(refined_prompt)
+                
+                with st.expander("View Generated Prompt (Debug)"):
+                    st.write(refined_prompt)
                 
             except Exception as e:
                 st.error(f"Error generating prompt: {e}")
@@ -332,7 +434,13 @@ def render_cover_generator():
                     f" NO TEXT. NO TYPOGRAPHY. NO BORDERS. NO LETTERBOXING. FILL THE WHOLE CANVAS."
                 )
 
-                img = generate_image_from_prompt(final_prompt)
+                if reference_image:
+                     st.info("Using reference image for generation...")
+                     # multimodal list: [text_prompt, image]
+                     prompt_content = [final_prompt, reference_image]
+                     img = generate_image_from_prompt(prompt_content)
+                else:
+                     img = generate_image_from_prompt(final_prompt)
                 
                 if img:
                     # Post-process: Trim black artifacts/letterboxing first
@@ -343,21 +451,26 @@ def render_cover_generator():
                     target_h = full_height_px
                     
                     # Use PIL ImageOps.fit to center-crop/resize to exact dimensions
+                    # We check scale to decide if we need to sharpen
+                    curr_w, curr_h = img.size
+                    scale_factor = max(target_w / curr_w, target_h / curr_h)
+                    
                     img_processed = ImageOps.fit(img, (target_w, target_h), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
 
-                    # Layout tabs for 2D and 3D views
-                    tabs = st.tabs(["Flat Cover", "3D Preview"])
-                    
-                    with tabs[0]:
-                        st.subheader("Flat Cover (Processed)")
-                        st.image(img_processed, caption="Full Spread (Back, Spine, Front)", use_container_width=True)
-                    
+                    # If we upscaled significantly (more than 10%), apply sharpening to maintain "quality" perception
+                    if scale_factor > 1.1:
+                         img_processed = img_processed.filter(ImageFilter.UnsharpMask(radius=2, percent=100, threshold=3))
+
                     # Prepare base64 for 3D view and download
                     buf = io.BytesIO()
                     img_processed.save(buf, format="PNG")
                     byte_im = buf.getvalue()
                     b64_img = base64.b64encode(byte_im).decode()
                     
+                    # Optional: View Flat Spread
+                    with st.expander("View Flat Print Spread (2D)"):
+                         st.image(img_processed, caption="Full Spread (Back, Spine, Front)", use_container_width=True)
+
                     # Construct data dict for 3D view logic (needed for CSS calcs below)
                     # We reconstruct the necessary parts of the previous 'data' object
                     data = {
@@ -370,8 +483,7 @@ def render_cover_generator():
                         }
                     }
 
-                    with tabs[1]:
-                        st.subheader("3D Prediction")
+                    st.subheader("3D Preview")
                     
                     # Calculate dimensions for CSS
                     # We use a fixed display width for the book front to keep it responsive/uniform
