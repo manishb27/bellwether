@@ -8,7 +8,12 @@
 Generate professional, print-ready book covers with full wrap-around designs (Front, Spine, Back).
 
 - **Powered by Gemini 3 Pro**: Utilizes `gemini-3-pro-image-preview` for high-fidelity, text-aware image generation.
-- **Interactive 3D Preview**: Instantly visualize your design on a rotatable 3D book model directly in the browser.
+- **Advanced Reference Image Control**:
+    - **Influence Strength**: Fine-tune how much the AI adheres to your reference image (from "Subtle" to "Maximal").
+    - **Smart Color Extraction**: Automatically extracts the dominant palette from your reference image and enforces it on the generated design.
+    - **Maximal Override**: "Maximal" mode forces the AI to treat the reference image as the primary source of truth, overriding conflicting text.
+- **Smart Upscaling**: Automatically sharpens and maintains perceived quality when generating high-resolution print files from AI outputs.
+- **Interactive 3D Preview**: Instantly visualize your design on a rotatable 3D book model directly in the browser (default view).
 - **Print-Ready Specifications**:
     - **Industry Standard Sizes**: Built-in presets for Mass Market, Trade Paperback, and Hardcover formats.
     - **Smart Spine Calculation**: Automatically computes spine width based on page count and paper type (Cream/White/Color).
