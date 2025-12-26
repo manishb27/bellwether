@@ -128,7 +128,7 @@ def render_pretty_plot(plot_points):
 
 def render_fiction_analyzer():
     st.header("Developmental Edit")
-    st.write("Input text from your story (e.g., 2000 words) to build a knowledge base. The text will be automatically chunked (500 words, 100 overlap) and processed.")
+
 
     # Import here to avoid issues if file missing
     try:
@@ -139,6 +139,12 @@ def render_fiction_analyzer():
         return
 
     # Initialize Session State for Agent and Knowledge Base
+    # Force reload of grammar agent if version mismatch (Hotfix)
+    GRAMMAR_AGENT_VERSION = 2
+    if "grammar_agent_version" not in st.session_state or st.session_state.grammar_agent_version < GRAMMAR_AGENT_VERSION:
+        if "grammar_agent_instance" in st.session_state:
+            del st.session_state.grammar_agent_instance
+        st.session_state.grammar_agent_version = GRAMMAR_AGENT_VERSION
     if "fiction_state" not in st.session_state:
         st.session_state.fiction_state = FictionState()
     
@@ -228,8 +234,7 @@ def render_fiction_analyzer():
                     st.session_state.grammar_history.insert(0, history_entry) # Add to top
 
                     # Store logs in expader but closed
-                    with st.expander("Debug Logs (Extraction Details)"):
-                        st.code(logs)
+
                             
                 except Exception as e:
                     st.error(f"Error processing text: {e}")
@@ -276,8 +281,7 @@ def render_fiction_analyzer():
             st.info("No locations identified.")
         
     # Raw JSON View (Hidden)
-    with st.expander("View Raw JSON State"):
-        st.code(st.session_state.fiction_state.model_dump_json(indent=2), language="json")
+
 
 
 
@@ -505,8 +509,7 @@ def render_non_fiction_analyzer():
                     logs = result_buffer.getvalue()
                     
                     st.success(f"Extraction & Resolution Complete! ({res})")
-                    with st.expander("Extraction Logs"):
-                        st.code(logs)
+
 
                 except Exception as e:
                     st.error(f"Error: {e}")
@@ -522,8 +525,7 @@ def render_non_fiction_analyzer():
     st.markdown(st.session_state.non_fiction_state.get_pretty_view())
     
     # Raw JSON
-    with st.expander("View Raw JSON State"):
-        st.code(st.session_state.non_fiction_state.model_dump_json(indent=2), language="json")
+
 
 if __name__ == "__main__":
     main()

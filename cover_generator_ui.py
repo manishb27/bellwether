@@ -3,7 +3,7 @@ import io
 import json
 import base64
 import streamlit as st
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageChops
 from google import genai
 from dotenv import load_dotenv
 
@@ -148,10 +148,36 @@ def generate_image_from_prompt(prompt):
                  st.warning(f"Model returned text instead of image: {part.text}")
         
         return None
+        return None
     except Exception as e:
         print(f"DEBUG: Exception: {e}")
         st.error(f"Generation failed: {e}")
         return None
+
+def trim_black_borders(img, tolerance=30):
+    """
+    Trims black (or near-black) borders from the image.
+    tolerance: 0-255 pixel value tolerence for 'black'.
+    """
+    if not img: return img
+    
+    # Convert to RGB to ensure consistent diffing
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
+        
+    bg = Image.new("RGB", img.size, (0, 0, 0))
+    diff = ImageChops.difference(img, bg)
+    
+    # Threshold: anything darker than tolerance is treated as black (0)
+    # anything brighter becomes white (255)
+    diff = diff.point(lambda p: 255 if p > tolerance else 0)
+    
+    # Get bounding box of non-black area
+    bbox = diff.getbbox()
+    
+    if bbox:
+        return img.crop(bbox)
+    return img
 
 def update_dimensions_from_preset():
     """Callback to update session state width/height from the selected preset."""
@@ -176,7 +202,7 @@ def render_cover_generator():
         # Genre selection with custom option
         genre = render_option_input("Genre/Theme (Prompt)", GENRE_OPTIONS, "Fantasy", "genre")
         isbn = st.text_input("ISBN", "")
-        blurb = st.text_area("Blurb", "It should have a knight holding a sword in front of an army\n")
+        blurb = st.text_area("User Input", "It should have a knight holding a sword in front of an army\n")
 
     st.header("Physical Specifications")
     
@@ -203,9 +229,10 @@ def render_cover_generator():
 
     col3, col4 = st.columns(2)
     with col3:
-        # Linked to session state
-        trim_width = st.number_input("Trim Width (in)", step=0.01, key="trim_width")
-        trim_height = st.number_input("Trim Height (in)", step=0.01, key="trim_height")
+        # Use values from session state (controlled by preset)
+        trim_width = st.session_state.trim_width
+        trim_height = st.session_state.trim_height
+        st.markdown(f"**Dimensions:** {trim_width}\" x {trim_height}\"")
         # target_dpi removed from UI, defaulting to 300 internally
         target_dpi = 300
         
@@ -266,7 +293,7 @@ def render_cover_generator():
     }
 
     st.subheader("Visual Preview")
-    if st.button("Generate Web Image (Gemini 3 Pro)"):
+    if st.button("Generate Image"):
         with st.spinner("Refining prompt with Gemini 2.0 Flash Lite..."):
             try:
                 # 1. Generate Creative Prompt
@@ -302,12 +329,15 @@ def render_cover_generator():
                 final_prompt = (
                     f"{refined_prompt} "
                     f" --ar {full_width_in:.2f}:{full_height_in:.2f}"
-                    f" NO TEXT. NO TYPOGRAPHY."
+                    f" NO TEXT. NO TYPOGRAPHY. NO BORDERS. NO LETTERBOXING. FILL THE WHOLE CANVAS."
                 )
 
                 img = generate_image_from_prompt(final_prompt)
                 
                 if img:
+                    # Post-process: Trim black artifacts/letterboxing first
+                    img = trim_black_borders(img)
+
                     # Post-process: Force alignment to calculated Aspect Ratio
                     target_w = full_width_px
                     target_h = full_height_px
@@ -315,10 +345,10 @@ def render_cover_generator():
                     # Use PIL ImageOps.fit to center-crop/resize to exact dimensions
                     img_processed = ImageOps.fit(img, (target_w, target_h), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
 
-                    # Layout columns for 2D and 3D views
-                    res_col1, res_col2 = st.columns(2)
+                    # Layout tabs for 2D and 3D views
+                    tabs = st.tabs(["Flat Cover", "3D Preview"])
                     
-                    with res_col1:
+                    with tabs[0]:
                         st.subheader("Flat Cover (Processed)")
                         st.image(img_processed, caption="Full Spread (Back, Spine, Front)", use_container_width=True)
                     
@@ -340,7 +370,7 @@ def render_cover_generator():
                         }
                     }
 
-                    with res_col2:
+                    with tabs[1]:
                         st.subheader("3D Prediction")
                     
                     # Calculate dimensions for CSS
@@ -373,6 +403,26 @@ def render_cover_generator():
                     # Ratio = real_full_w / real_spine_w.
                     bg_scale_spine = (real_full_w / real_spine_w) * 100
 
+                    # Calculate Background Positions for seamless wrapping
+                    # Front Face: Display segment starting after (Bleed + Back + Spine)
+                    # We need to shift the background LEFT by this amount.
+                    # The scale is based on Trim Width (disp_width).
+                    offset_front_in = BLEED_IN + real_trim_w + real_spine_w
+                    # Convert inch offset to pixels relative to the display element
+                    offset_front_px = (offset_front_in / real_trim_w) * disp_width
+                    bg_pos_front_str = f"-{offset_front_px:.2f}px"
+
+                    # Back Face: Display segment starting after (Bleed)
+                    offset_back_in = BLEED_IN
+                    offset_back_px = (offset_back_in / real_trim_w) * disp_width
+                    bg_pos_back_str = f"-{offset_back_px:.2f}px"
+
+                    # Spine Face: Display segment starting after (Bleed + Back)
+                    offset_spine_in = BLEED_IN + real_trim_w
+                    # Scale is based on Spine Width (css_thick)
+                    offset_spine_px = (offset_spine_in / real_spine_w) * css_thick
+                    bg_pos_spine_str = f"-{offset_spine_px:.2f}px"
+
                     # 3D Book CSS
                     # Refined to auto-rotate smoothly without Streamlit interactions.
                     
@@ -381,12 +431,13 @@ def render_cover_generator():
                         .book-viewport {{
                             perspective: 1500px;
                             display: flex;
-                            justify-content: center;
+                            justify-content: flex-start;
                             align-items: center;
                             width: 100%;
                             height: {css_h + 80}px;
                             padding-top: 40px;
                             padding-bottom: 40px;
+                            padding-left: 20px;
                         }}
                         
                         /* The 3D Object Container */
@@ -436,7 +487,7 @@ def render_cover_generator():
                             transform: translateZ({css_thick / 2}px);
                             background-image: url('data:image/png;base64,{b64_img}');
                             background-size: {bg_scale_front}% 100%; 
-                            background-position: 100% 0; 
+                            background-position: {bg_pos_front_str} 0; 
                         }}
                         
                         /* BACK COVER (Facing -Z) */
@@ -448,7 +499,7 @@ def render_cover_generator():
                             transform: rotateY(180deg) translateZ({css_thick / 2}px);
                             background-image: url('data:image/png;base64,{b64_img}');
                             background-size: {bg_scale_front}% 100%; 
-                            background-position: 0% 0;
+                            background-position: {bg_pos_back_str} 0;
                         }}
                         
                         /* SPINE (Facing -X -> Left) */
@@ -458,14 +509,16 @@ def render_cover_generator():
                             height: {css_h}px;
                             /* 
                                Rotate -90 deg to face Left.
-                               Translate Z by half width to push it out to the edge.
-                               Wait, if width is {disp_width}, half width is {disp_width/2}.
-                               AND we might need a slight overlap (-0.5px) to prevent gaps.
+                               Move to X=0 (Left Edge).
+                               Initial Center X is css_thick/2.
+                               Target is X=0. Shift = -css_thick/2.
+                               Local Z is Global -X.
+                               So translateZ(css_thick/2).
                             */
-                            transform: rotateY(-90deg) translateZ({disp_width / 2 - 0.5}px);
+                            transform: rotateY(-90deg) translateZ({css_thick / 2}px);
                             background-image: url('data:image/png;base64,{b64_img}');
                             background-size: {bg_scale_spine}% 100%;
-                            background-position: 50% 0;
+                            background-position: {bg_pos_spine_str} 0;
                         }}
                         
                         /* PAGES (Facing +X -> Right) */
@@ -473,7 +526,7 @@ def render_cover_generator():
                             width: {css_thick - 2}px; /* Slightly recessed */
                             height: {css_h - 4}px; /* Slightly shorter */
                             /* Rotate 90 deg to face Right */
-                            transform: rotateY(90deg) translateZ({disp_width / 2 - 2}px) translateY(2px);
+                            transform: rotateY(90deg) translateZ({disp_width - (css_thick / 2)}px) translateY(2px);
                             background: repeating-linear-gradient(
                                 90deg,
                                 #fdfdfd 0px,

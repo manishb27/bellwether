@@ -139,20 +139,42 @@ class GrammarAgent:
             try:
                 lt_matches = self.tools.lt_tool.check(text)
                 for match in lt_matches:
-                    itype = "grammar"
-                    if match.ruleIssueType == 'misspelling': itype = "spelling"
-                    elif match.ruleIssueType == 'style': itype = "style"
+                    # Helper to safely get attributes from the unpredictable Match object
+                    def safe_get(obj, attr, default):
+                        try:
+                            return getattr(obj, attr, default)
+                        except Exception:
+                            return default
+
+                    category = safe_get(match, 'category', 'grammar')
+                    # Some versions use ruleId, some use rule. Some might wrap it.
+                    rule_id = safe_get(match, 'ruleId', safe_get(match, 'rule', 'UNKNOWN_RULE'))
+                    
+                    if category == 'Typos': 
+                        itype = "spelling"
+                    elif category == 'Style': 
+                        itype = "style"
+                    else: 
+                        itype = "grammar"
+
+                    if "SPELLING" in str(rule_id): itype = "spelling"
+                    
+                    # Safe extraction of other fields
+                    msg = safe_get(match, 'message', 'Grammar Issue')
+                    offset = safe_get(match, 'offset', 0)
+                    error_length = safe_get(match, 'errorLength', 0)
+                    replacements = safe_get(match, 'replacements', [])
                     
                     issues.append(GrammarIssue(
                         type=itype,
-                        issue=match.ruleId,
-                        explanation=match.message,
-                        original_text=text[match.offset : match.offset + match.errorLength],
-                        suggested_fix=match.replacements[0] if match.replacements else "",
+                        issue=str(rule_id),
+                        explanation=msg,
+                        original_text=text[offset : offset + error_length],
+                        suggested_fix=replacements[0] if replacements else "",
                         severity="high" if itype == 'spelling' else "medium",
                         source="languagetool",
-                        start_char=match.offset,
-                        end_char=match.offset + match.errorLength
+                        start_char=offset,
+                        end_char=offset + error_length
                     ))
             except Exception as e:
                 print(f"LanguageTool Error: {e}")
@@ -185,8 +207,9 @@ class GrammarAgent:
                 self._run_homophone_rules(text, tokens, issues)
                 
             except LookupError:
-                nltk.download('punkt')
-                nltk.download('averaged_perceptron_tagger')
+                nltk.download('punkt', quiet=True)
+                nltk.download('averaged_perceptron_tagger_eng', quiet=True)
+                nltk.download('averaged_perceptron_tagger', quiet=True)
                 # Retry once
                 tokens = word_tokenize(text)
                 tagged = pos_tag(tokens)
